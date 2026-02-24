@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local config / secrets
+config.env
+*.env
+secrets.env
+
+# Logs / outputs
+*.log
+backtest_results/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
