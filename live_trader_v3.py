@@ -245,6 +245,11 @@ class LiveTraderV3:
         self._price_history: Dict[str, List[Tuple[datetime, float]]] = {}  # symbol -> [(time, price), ...]
         self._volume_history: Dict[str, List[Tuple[datetime, float]]] = {}  # symbol -> [(time, volume), ...]
         self._market_anomaly_paused = False  # 是否因市场异常暂停交易
+        # 记录最近一次触发市场异常暂停的原因（包含交易对）
+        self._last_market_anomaly_reasons: str = ""
+        # 流动性异常的币种黑名单（只影响监控序列，不影响其它分类/币种）
+        self._liquidity_blacklist_symbols: set[str] = set()
+        self._last_market_anomaly_reasons: str = ""  # 最近一次触发市场异常暂停的原因（包含交易对）
         
         # 启动信息
         self._print_startup_info(initial_balance)
@@ -533,16 +538,36 @@ class LiveTraderV3:
             logging.debug(f"[分类] 扫描分类: {category}")
             
             # 优化：减少每个分类的币种数量（从20降到10，减少API请求）
-            # 获取币种数据
-            top_n = min(MONITOR_CONFIG.get('top_n', 20), 10)  # 最多10个币种
-            coins = self.fetcher.get_top_coins_by_category(
+            # 获取币种数据（多取一些，用于替换流动性异常的币种）
+            top_n = min(MONITOR_CONFIG.get('top_n', 20), 10)  # 实际监控的目标数量，最多10个币种
+            fetch_n = min(top_n * 2, 30)  # 预取数量，便于用同分类其它币种替换
+            raw_coins = self.fetcher.get_top_coins_by_category(
                 category, 
-                top_n
+                fetch_n
             )
             
-            if not coins:
+            if not raw_coins:
                 continue
-            
+
+            # P0优化：将流动性异常的币种移除监控序列，用同分类其他交易对替换
+            coins: List[Dict] = []
+            for coin in raw_coins:
+                sym = (coin.get('id') or coin.get('symbol') or "").upper()
+                if not sym:
+                    continue
+                if sym in getattr(self, "_liquidity_blacklist_symbols", set()):
+                    # 流动性异常的币种，不参与监控/龙头检测
+                    logging.debug(f"⏭️ 流动性异常黑名单，移出监控序列: {sym} [{category}]")
+                    continue
+                coins.append(coin)
+                if len(coins) >= top_n:
+                    break
+
+            if not coins:
+                # 该分类全部币种都在流动性黑名单中，暂时跳过该分类
+                logging.info(f"⏭️ 分类 {category} 全部币种在流动性黑名单中，跳过本轮监控")
+                continue
+
             category_coins = coins.copy()
             category_snapshots[category] = category_coins
             
@@ -616,13 +641,13 @@ class LiveTraderV3:
                             ma20 = close.rolling(20).mean().iloc[-1]
                             last_close = float(close.iloc[-1])
                             trend_ok = True
-                            # 优化：放宽趋势确认条件
-                            # 允许 ma5 < ma10 但 last_close > ma20 * 0.95（从0.98放宽到0.95）
+                            # P0修复：进一步放宽趋势确认条件（从0.95降低到0.90）
+                            # 允许 ma5 < ma10 但 last_close > ma20 * 0.90（从0.95放宽到0.90）
                             if pd.notna(ma5) and pd.notna(ma10) and ma5 < ma10:
                                 # 如果 ma5 < ma10，但价格仍在 ma20 上方，仍认为趋势OK
-                                if pd.notna(ma20) and last_close < float(ma20) * 0.95:
+                                if pd.notna(ma20) and last_close < float(ma20) * 0.90:
                                     trend_ok = False
-                            elif pd.notna(ma20) and last_close < float(ma20) * 0.95:
+                            elif pd.notna(ma20) and last_close < float(ma20) * 0.90:
                                 trend_ok = False
 
                             vol_ok = True
@@ -632,8 +657,8 @@ class LiveTraderV3:
                                 avg_vol = float(volume.iloc[-20:].mean()) if len(volume) >= 20 else float(volume.mean())
                                 if avg_vol > 0:
                                     vol_ratio = current_vol / avg_vol
-                                    # 优化：降低成交量要求从0.8到0.6
-                                    if vol_ratio < 0.6:
+                                    # P0修复：大幅降低成交量要求从0.6到0.4（解决反弹行情成交量不足问题）
+                                    if vol_ratio < 0.4:
                                         vol_ok = False
 
                             if not (trend_ok and vol_ok):
@@ -694,9 +719,10 @@ class LiveTraderV3:
             self._update_rotation_context(category_snapshots)
             self._last_rotation_update_time = datetime.now()
 
-        # P0优化：如果市场异常暂停，跳过交易信号处理
+        # P0优化：如果市场异常暂停，跳过信号处理（输出具体原因/交易对）
         if self._market_anomaly_paused:
-            logging.warning("⚠️ 市场异常检测暂停交易，跳过信号处理")
+            reason = self._last_market_anomaly_reasons or "原因未知"
+            logging.warning(f"⚠️ 市场异常检测暂停交易，跳过信号处理 (原因: {reason})")
             return
 
         # 处理交易信号
@@ -932,6 +958,8 @@ class LiveTraderV3:
             
             flash_crash_detected = False
             liquidity_issue_detected = False
+            flash_crash_symbols: List[str] = []
+            liquidity_issue_symbols: List[str] = []
             
             for symbol in symbols_to_check:
                 try:
@@ -958,6 +986,7 @@ class LiveTraderV3:
                                 drop_pct = ((max_price - min_price) / max_price) * 100
                                 if drop_pct >= self.flash_crash_threshold:
                                     flash_crash_detected = True
+                                    flash_crash_symbols.append(symbol)
                                     logging.error("=" * 60)
                                     logging.error(f"🚨 闪崩检测！{symbol} 在{self.flash_crash_window_minutes}分钟内下跌 {drop_pct:.2f}%")
                                     logging.error("🚨 触发闪崩保护，暂停新开仓，收紧止损到2%")
@@ -995,6 +1024,7 @@ class LiveTraderV3:
                                     # 优化5：下降幅度需要超过阈值，且是连续下降
                                     if vol_drop_pct >= self.liquidity_drop_threshold and recent_all_below:
                                         liquidity_issue_detected = True
+                                        liquidity_issue_symbols.append(symbol)
                                         logging.warning(f"⚠️ 流动性异常：{symbol} 成交量下降 {vol_drop_pct:.2f}% (最近3根均低于平均值50%)")
                     except Exception:
                         pass
@@ -1003,12 +1033,33 @@ class LiveTraderV3:
                     logging.debug(f"市场异常检测失败 {symbol}: {e}")
                     continue
             
-            # 更新暂停状态
+            # 更新暂停状态与流动性黑名单
             if flash_crash_detected or liquidity_issue_detected:
-                if not self._market_anomaly_paused:
+                # 组装详细原因，包含触发的交易对列表
+                reasons = []
+                if flash_crash_symbols:
+                    unique_flash = sorted(set(flash_crash_symbols))
+                    reasons.append(f"闪崩: {', '.join(unique_flash)}")
+                if liquidity_issue_symbols:
+                    unique_liq = sorted(set(liquidity_issue_symbols))
+                    reasons.append(f"流动性异常: {', '.join(unique_liq)}")
+                reason_str = "; ".join(reasons) if reasons else "未知原因"
+                self._last_market_anomaly_reasons = reason_str
+
+                # 1) 闪崩：依旧触发全局暂停（属于极端行情）
+                if flash_crash_detected and not self._market_anomaly_paused:
                     self._market_anomaly_paused = True
                     self.trade_enabled = False
-                    logging.warning("⚠️ 市场异常检测暂停交易")
+                    logging.warning(f"⚠️ 市场异常检测暂停交易 ({reason_str})")
+
+                # 2) 流动性异常：只把相关币种加入流动性黑名单，不暂停其他币种/分类
+                if liquidity_issue_symbols:
+                    for sym in liquidity_issue_symbols:
+                        self._liquidity_blacklist_symbols.add(sym.upper())
+                    logging.info(
+                        "ℹ️ 流动性异常黑名单更新: %s",
+                        ", ".join(sorted({s.upper() for s in liquidity_issue_symbols}))
+                    )
             else:
                 # 如果之前暂停了，现在恢复正常，可以解除暂停（但需要手动确认）
                 # 这里保守处理：不自动解除，需要等待一段时间

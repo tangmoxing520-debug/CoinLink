@@ -1,0 +1,104 @@
+{
+  "4c36ef335e8b35a5": {
+    "category": "SOL",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "SOLUSDT",
+      "WIFUSDT",
+      "1000BONKUSDT",
+      "JUPUSDT",
+      "RAYUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:05.498804"
+  },
+  "8b418b703450e531": {
+    "category": "Meme",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "DOGEUSDT",
+      "1000PEPEUSDT",
+      "WIFUSDT",
+      "1000SHIBUSDT",
+      "1000BONKUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:07.371020"
+  },
+  "eaee8c6657ee32d0": {
+    "category": "AI Agent",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "FARTCOINUSDT",
+      "VIRTUALUSDT",
+      "AIXBTUSDT",
+      "ARCUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:09.873666"
+  },
+  "f9ec79f611bb4e6f": {
+    "category": "AI Agency",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "TAOUSDT",
+      "FETUSDT",
+      "AKTUSDT",
+      "AGIXUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:12.342783"
+  },
+  "d998511e1caf4af2": {
+    "category": "Layer1",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "ADAUSDT",
+      "DOTUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:15.243867"
+  },
+  "ba9da647e93f2267": {
+    "category": "Layer2",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "OPUSDT",
+      "ARBUSDT",
+      "IMXUSDT",
+      "STRKUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:17.779801"
+  },
+  "a0ccadc7085a69ae": {
+    "category": "RWA",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "symbols": [
+      "ONDOUSDT",
+      "RSRUSDT",
+      "ENAUSDT",
+      "COMPUSDT"
+    ],
+    "cached_at": "2026-03-11T02:05:20.303489"
+  },
+  "aef740ffd7a7bece": {
+    "symbol": "BTCUSDT",
+    "interval": "15m",
+    "start_date": "2025-02-01T00:00:00",
+    "end_date": "2025-03-10T00:00:00",
+    "rows": 3553,
+    "cached_at": "2026-03-11T02:05:20.307489"
+  }
+}
