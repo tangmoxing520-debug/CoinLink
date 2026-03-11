@@ -149,21 +149,86 @@ class TradeResult:
     signal_score: float
 
 
+# P0优化：使用统一信号评分器（与回测一致）
+try:
+    from unified_signal_scorer import UnifiedSignalScorer, ScoreBreakdown
+    UNIFIED_SCORER_AVAILABLE = True
+except ImportError:
+    UNIFIED_SCORER_AVAILABLE = False
+    logging.warning("统一信号评分器不可用，使用简化版")
+
 class SignalScorerLive:
-    """实时信号评分器 - 简化版"""
+    """实时信号评分器 - P0优化：使用统一评分器确保与回测一致"""
     
     def __init__(self):
         self.config = SIGNAL_SCORE_CONFIG
         self.min_score = SIGNAL_MIN_SCORE
+        
+        # P0优化：优先使用统一评分器
+        if UNIFIED_SCORER_AVAILABLE:
+            self.unified_scorer = UnifiedSignalScorer(self.config)
+            self.use_unified = True
+        else:
+            self.use_unified = False
+            logging.warning("统一评分器不可用，使用简化版评分逻辑")
     
     def calculate_score(
         self,
         df: pd.DataFrame,
         trigger_change: float = 0.0,
         coin_change: float = 0.0,
-        category: str = ""
+        category: str = "",
+        trigger_df: pd.DataFrame = None,
+        sector_tier = None
     ) -> Tuple[float, Dict]:
-        """计算信号评分"""
+        """
+        计算信号评分
+        
+        P0优化：使用统一评分器确保与回测一致
+        """
+        # 使用统一评分器
+        if self.use_unified:
+            try:
+                score, breakdown = self.unified_scorer.calculate_score(
+                    df=df,
+                    idx=None,  # 实盘使用最后一条数据
+                    trigger_change=trigger_change,
+                    coin_change=coin_change,
+                    trigger_df=trigger_df,
+                    category=category,
+                    sector_tier=sector_tier
+                )
+                # 转换为Dict格式（兼容旧接口）
+                details = {
+                    'trend': breakdown.trend_score,
+                    'volume': breakdown.volume_score,
+                    'momentum': breakdown.momentum_score,
+                    'volatility': breakdown.volatility_score,
+                    'correlation': breakdown.correlation_score,
+                    'final_score': breakdown.final_score,
+                    **breakdown.trend_details,
+                    **breakdown.volume_details,
+                    **breakdown.momentum_details,
+                    **breakdown.volatility_details,
+                    **breakdown.correlation_details
+                }
+                return score, details
+            except Exception as e:
+                logging.warning(f"统一评分器计算失败，回退到简化版: {e}")
+                # 回退到简化版
+                return self._calculate_score_simple(df, trigger_change, coin_change, category)
+        else:
+            # 回退到简化版
+            return self._calculate_score_simple(df, trigger_change, coin_change, category)
+    
+    def _calculate_score_simple(
+        self,
+        df: pd.DataFrame,
+        trigger_change: float,
+        coin_change: float,
+        category: str
+    ) -> Tuple[float, Dict]:
+        """简化版评分（兼容旧逻辑）"""
         score = 50.0  # 基础分
         details = {}
         
@@ -393,6 +458,33 @@ class TraderV2:
         # ========== 回测优势：板块轮动权重（由 LiveTraderV3 注入） ==========
         self._rotation_weight_multiplier: Dict[str, float] = {}  # category -> multiplier (1.0=等权)
         self._rotation_tier: Dict[str, str] = {}  # category -> hot/warm/neutral/cold
+    
+    def _get_sector_tier(self, category: str):
+        """获取板块层级（用于Hot板块加成）- P0优化"""
+        try:
+            if hasattr(self, '_rotation_tier') and self._rotation_tier:
+                tier_str = (self._rotation_tier.get(category) or "").lower()
+                if tier_str == "hot":
+                    try:
+                        from rotation_models import SectorTier
+                        return SectorTier.HOT
+                    except ImportError:
+                        return None
+                elif tier_str == "warm":
+                    try:
+                        from rotation_models import SectorTier
+                        return SectorTier.WARM
+                    except ImportError:
+                        return None
+                elif tier_str == "cold":
+                    try:
+                        from rotation_models import SectorTier
+                        return SectorTier.COLD
+                    except ImportError:
+                        return None
+        except Exception:
+            pass
+        return None
         
         # 实盘API客户端
         self.binance_api = None
@@ -1150,27 +1242,26 @@ class TraderV2:
                 else:
                     # 缓存过期，重新计算
                     del self._signal_score_cache[score_cache_key]
+                    # P0优化：传递更多参数给统一评分器（Hot板块加成已集成）
                     signal_score, score_details = self.signal_scorer.calculate_score(
-                        df, trigger_change, coin_change, category
+                        df, trigger_change, coin_change, category,
+                        trigger_df=None,  # 实盘暂时不传递trigger_df
+                        sector_tier=self._get_sector_tier(category)
                     )
                     # 更新缓存
                     self._signal_score_cache[score_cache_key] = (signal_score, score_details, time.time())
             else:
                 # 无缓存，计算并缓存
+                # P0优化：传递更多参数给统一评分器（Hot板块加成已集成）
                 signal_score, score_details = self.signal_scorer.calculate_score(
-                    df, trigger_change, coin_change, category
+                    df, trigger_change, coin_change, category,
+                    trigger_df=None,  # 实盘暂时不传递trigger_df
+                    sector_tier=self._get_sector_tier(category)
                 )
                 self._signal_score_cache[score_cache_key] = (signal_score, score_details, time.time())
 
-            # 回测优势：板块 HOT 评分加成（由轮动层级提供）
-            try:
-                tier = (self._rotation_tier.get(category) or "").lower()
-                if tier == "hot":
-                    boost = float(ROTATION_CONFIG.get("hot_score_boost", 1.0))
-                    if boost > 1.0:
-                        signal_score = min(100.0, signal_score * boost)
-            except Exception:
-                pass
+            # P0优化：Hot板块加成已集成到统一评分器中，这里保留作为兼容性检查
+            # 统一评分器会自动处理Hot板块加成，无需重复处理
 
             # 回测优势：信号校准（成交量/波动率/市场环境）并可能跳过低质量信号
             volume_ratio = self._calc_volume_ratio(df)

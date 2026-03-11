@@ -401,6 +401,17 @@ class BinanceDataFetcher(BaseDataFetcher):
 
 def create_data_fetcher():
     """创建数据获取器工厂函数"""
+    # P0优化：使用优化的数据获取器（批量请求和智能缓存）
+    try:
+        from optimized_data_fetcher import OptimizedDataFetcher
+        if EXCHANGE == 'binance':
+            return OptimizedDataFetcher()
+        elif EXCHANGE == 'gate':
+            return OptimizedDataFetcher()
+    except ImportError:
+        # 如果优化模块不可用，回退到原始fetcher
+        pass
+    
     # 统一使用 GateDataFetcher，它已支持币安合约API
     if EXCHANGE == 'binance':
         return GateDataFetcher()
